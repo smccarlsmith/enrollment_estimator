@@ -1,4 +1,5 @@
 # Load libraries
+library(tidyverse)
 library(rvest)
 library(polite)
 library(httr)
@@ -6,6 +7,7 @@ library(jsonlite)
 library(glue)
 library(purrr)
 library(readxl)
+library(plotly)
 
 # Import AZ cities-----
 cities_df <- read_csv("enrollment_prediction_app/web/az_cities.csv") %>% 
@@ -80,11 +82,16 @@ write_csv(cities_pop_df, "enrollment_prediction_app/web/cities_population.csv")
 
 
 # List all files in the enrollment folder
-enrollment_files <- list.files(
+enrollment_files <- str_subset(
+  list.files(
     "enrollment_prediction_app/web/enrollment_data", 
     recursive = TRUE, 
     full.names = TRUE
-    )
+  ), 
+  # remove paths to open Excel files
+  pattern = "\\$", 
+  negate = T
+  )
 
 # Define a function to import and clean ADE data
 import_ade_f1 <- function(file_path){
@@ -109,8 +116,9 @@ import_ade_f1 <- function(file_path){
     )
   
   # Rename the district and school entity id columns
-  names(enrollment_f1)[str_detect(names(enrollment_f1), "dist.*id$")] <- "dist_entity_id"
+  names(enrollment_f1)[str_detect(names(enrollment_f1), "dist.*id$")] <- "lea_entity_id"
   names(enrollment_f1)[str_detect(names(enrollment_f1), "school.*id$")] <- "sch_entity_id"
+  names(enrollment_f1)[str_detect(names(enrollment_f1), "^district.*")] <- "lea_name"
   
   # Define a vector of grade columns (some files include PreSchool, some don't)
   columns <- names(enrollment_f1)[names(enrollment_f1) %in% c("ps", "kg", as.character(1:12), "total")]
@@ -123,7 +131,6 @@ import_ade_f1 <- function(file_path){
       names_to = "grade", 
       values_to = "n", 
       values_drop_na = TRUE) %>% 
-    
     mutate(
       # Remove all the asterisks from redaction
       n = str_remove_all(n, "\\*"), 
@@ -132,11 +139,11 @@ import_ade_f1 <- function(file_path){
     ) %>% 
     # Filter out school level rows
     filter(
-      !is.na(dist_entity_id), 
-      is.na(sch_entity_id)
+      (!is.na(lea_entity_id) & lea_entity_id != "_"), # one file uses "_" for missing values
+      (is.na(sch_entity_id)|sch_entity_id == "_")
     ) %>% 
     # Calculate total students by district
-    group_by(dist_entity_id, grade) %>% 
+    group_by(lea_entity_id, lea_name, grade) %>% 
     summarise(students = sum(n, na.rm = TRUE)) %>% 
     ungroup() %>% 
     mutate(fiscal_yr = year)
@@ -145,19 +152,86 @@ import_ade_f1 <- function(file_path){
   }
 
 ade_f1_list <- lapply(
-  grep("format_1/ade", enrollment_files, value = T), 
+  grep("format_1", enrollment_files, value = T), 
   import_ade_f1
 )
 
 ade_f1 <- map_dfr(ade_f1_list, as_tibble)
 
 # Define a function to import format 2 data from ADE
-import_ade_f2 <- function(file_path){}
+import_ade_f2 <- function(file_path){
+
+  year <- as.numeric(str_extract(file_path, "\\d{4}"))
+  
+  enrollment_f2 <- read_excel(
+    file_path, 
+    sheet = "LEA by Grade"
+    ) %>% 
+    distinct() %>% 
+    # Coerce all columns to strings
+    mutate(across(.fns = as.character))
+  
+  # Clean column names
+    names(enrollment_f2) <- tolower(
+      str_replace_all(
+        names(enrollment_f2), 
+        " ", "_"
+      )
+    )
+
+  # Redefine enrollment_f2
+  enrollment_f2 <- enrollment_f2 %>% 
+    select(-fiscal_year) %>% 
+    # Convert to long format
+    pivot_longer(
+      cols = ps:total, 
+      names_to = "grade", 
+      values_to = "students", 
+      values_drop_na = TRUE) %>% 
+    # Remove rows with missing LEA ID
+    filter(!is.na(lea_entity_id)) %>% 
+    mutate(
+      # Remove all the asterisks from redaction
+      students = str_remove_all(students, "\\*"), 
+      # Convert students to numeric
+      students = as.numeric(students)
+    ) %>% 
+    mutate(fiscal_yr = year)
+}
+
+ade_f2_list <- lapply(
+  grep("format_2", enrollment_files, value = T), 
+  import_ade_f2
+)
+
+# Bind the enrollment files from each year
+ade_f2 <- map_dfr(ade_f2_list, as_tibble)
+
+# Create a consolidated lookup table for LEA names
+lea_lookup <- bind_rows(
+  distinct(ade_f1, lea_name, lea_entity_id), 
+  distinct(ade_f2, lea_name, lea_entity_id)
+) %>% 
+  distinct()
+
+# Check names for consistency across years in lea lookup
+dup_index <- lea_lookup$lea_entity_id[duplicated(lea_lookup$lea_entity_id)]
+# View(lea_lookup[lea_lookup$lea_entity_id %in% dup_index, ]) %>% 
+#   arrange(lea_entity_id)
+
+# Bind the format 1 and 2 dataframes
+enrollment_all <- bind_rows(
+  ade_f1, ade_f2
+)
+
+View(enrollment_all[enrollment_all$lea_entity_id %in% dup_index, ]) %>% 
+  arrange(lea_entity_id)
 
 # Quick exploration of data -----
-ade_f1 %>% 
+ggplotly(
+enrollment_all %>% 
   filter(
-    dist_entity_id %in% c(
+    lea_entity_id %in% c(
       4289 #AFUHSD
       ,4281 #LESD
       ,4235 #Mesa
@@ -168,6 +242,7 @@ ade_f1 %>%
       ), 
     grade == "total"
     ) %>% 
-ggplot(aes(x = fiscal_yr, y = students, color = dist_entity_id)) +
-  geom_line()
+ggplot(aes(x = fiscal_yr, y = students, color = lea_entity_id)) +
+  geom_line() +
+  geom_point()) 
 
