@@ -208,24 +208,48 @@ ade_f2_list <- lapply(
 ade_f2 <- map_dfr(ade_f2_list, as_tibble)
 
 # Create a consolidated lookup table for LEA names
-lea_lookup <- bind_rows(
-  distinct(ade_f1, lea_name, lea_entity_id), 
-  distinct(ade_f2, lea_name, lea_entity_id)
-) %>% 
-  distinct()
-
-# Check names for consistency across years in lea lookup
-dup_index <- lea_lookup$lea_entity_id[duplicated(lea_lookup$lea_entity_id)]
-# View(lea_lookup[lea_lookup$lea_entity_id %in% dup_index, ]) %>% 
-#   arrange(lea_entity_id)
+# Data shows some entities that changed their name slightly over the years, 
+# but the most frequent cause of duplicates is for students tuitioned out.
+lea_lookup <- bind_rows(ade_f1, ade_f2) %>% 
+  distinct() %>% 
+  # Slice the max number of students to get the correct lea name, 
+  group_by(lea_entity_id, lea_name, fiscal_yr) %>% 
+  summarise(students = sum(students, na.rm = TRUE)) %>% 
+  group_by(lea_entity_id, fiscal_yr) %>% 
+  slice_max(order_by = students, n = 1, with_ties = FALSE) %>%
+  # Slice the max year to get the latest version of that name.
+  group_by(lea_entity_id) %>% 
+  slice_max(order_by = fiscal_yr, n = 1, with_ties = FALSE) %>% 
+  ungroup() %>% 
+  select(lea_entity_id, lea_name) %>% 
+  distinct() %>% 
+  # Create shorter versions of LEA names to make visuals and app inputs easier to use
+  mutate(
+    lea_name = str_squish(lea_name),
+    lea_abbr = str_to_title(lea_name), 
+    lea_abbr = str_replace_all(lea_abbr, "Union High School District", "UHSD"), 
+    lea_abbr = str_replace_all(lea_abbr, "High School", "HS"), 
+    lea_abbr = str_replace_all(lea_abbr, "Elementary.*District", "El."), 
+    lea_abbr = str_replace_all(lea_abbr, "Unified District", "Unified"), 
+    lea_abbr = str_replace_all(lea_abbr, "School", "Sch."), 
+    lea_abbr = str_replace_all(lea_abbr, "District", "Dist."), 
+    lea_abbr = str_replace_all(lea_abbr, "Academy", "Acad."),
+    lea_abbr = str_replace_all(lea_abbr, "Preparatory", "Prep"),
+    lea_abbr = str_replace_all(lea_abbr, "Arizona", "AZ")
+  )
 
 # Bind the format 1 and 2 dataframes
 enrollment_all <- bind_rows(
   ade_f1, ade_f2
-)
+) %>% 
+  # Slice the highest value for each entity ID each year
+  # That will exclude tuitioned out students since they should not be considered in a school's enrollment.
+  group_by(lea_entity_id, grade, fiscal_yr) %>% 
+  slice_max(order_by = students, n = 1, with_ties = FALSE) %>% 
+  ungroup() %>% 
+  select(-lea_name) %>% 
+  left_join(lea_lookup, by = "lea_entity_id")
 
-View(enrollment_all[enrollment_all$lea_entity_id %in% dup_index, ]) %>% 
-  arrange(lea_entity_id)
 
 # Quick exploration of data -----
 ggplotly(
@@ -242,7 +266,7 @@ enrollment_all %>%
       ), 
     grade == "total"
     ) %>% 
-ggplot(aes(x = fiscal_yr, y = students, color = lea_entity_id)) +
+ggplot(aes(x = fiscal_yr, y = students, color = lea_abbr)) +
   geom_line() +
   geom_point()) 
 
