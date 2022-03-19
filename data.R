@@ -8,6 +8,8 @@ library(glue)
 library(purrr)
 library(readxl)
 library(plotly)
+library(censusapi)
+library(fuzzyjoin)
 
 # Import AZ cities-----
 cities_df <- read_csv("enrollment_prediction_app/web/az_cities.csv") %>% 
@@ -61,7 +63,9 @@ cities_pop_df <- map_dfr(cities_data_list, as_tibble) %>%
     across(
       .cols = c(Year, Population, Growth, `Annual Growth Rate`), 
       .fns = as.numeric
-      )
+      ), 
+    # Clean the city names to match across data sources, replace all non-letter characters
+    clean_city = str_replace_all(tolower(city), "[^\\w]+", "_")
     )
 
 # investigate missing values before coercing numbers
@@ -269,4 +273,167 @@ enrollment_all %>%
 ggplot(aes(x = fiscal_yr, y = students, color = lea_abbr)) +
   geom_line() +
   geom_point()) 
+
+# Scrape City latitude and longitude data
+city_geocodes <- read_html("https://www.mapsofworld.com/usa/states/arizona/lat-long.html") %>% 
+  html_element(css = ".geo_facts_td_algn") %>% 
+  html_table() %>% 
+  mutate(
+    # Clean city names for matching across data sources by replacing non-letter characters
+    clean_city = str_remove(Location, " city| town"),
+    clean_city = str_replace_all(
+      str_squish(tolower(clean_city)), 
+      "[^\\w]+",
+      "_"
+    ), 
+  )
+
+
+# Scrape districts by city
+lea_cities <- read_html("https://www.greatschools.org/schools/districts/Arizona/AZ/") %>% 
+  html_element(css = ".districts-cities-list") %>% 
+  html_table()
+
+# Scrape School District Addresses
+lea_cities_formatted <- lea_cities %>% 
+  # Add a column with URLs
+  mutate(
+    url_string = paste(
+      "https://www.greatschools.org/arizona", 
+      City, 
+      `District name`, 
+      "",
+      sep = "/"
+      ),
+    url_string = str_replace_all(url_string, " ", "-"), 
+    url_string = tolower(url_string), 
+    # Add an empty column to fill with address information
+    info = ""
+    )
+
+# Loop through urls to scrape address information and add it to lea_cities_formatted object
+for #(d in 1:5) {
+  (d in 1:length(lea_cities_formatted$url_string)) {
+  lea_info <- read_html(lea_cities_formatted$url_string[d]) %>% 
+    # html_element(css = ".container-gs-v2 , .content") %>% 
+    html_element(css = ".school-info") %>% 
+    html_text() %>% 
+    str_squish() 
+  
+  lea_cities_formatted$info[d] <- lea_info
+}
+
+# Define an object to clean addresses and extract entity ID for lookup
+lea_addresses_clean <- lea_cities_formatted %>% 
+  rename("lea_name" = "District name") %>% 
+  mutate(
+    lea_name_clean = str_squish(lea_name),
+    lea_entity_id = str_extract(str_squish(lea_name), "\\(\\d*\\)"), 
+    lea_entity_id = str_remove_all(lea_entity_id, "[\\(\\)]"), 
+    lea_address = str_remove(info, fixed(lea_name_clean)), 
+    lea_address = str_squish(lea_address),
+    lea_phone = str_extract(lea_address, " \\(\\d{3}\\) \\d{3}-\\d{4}"), 
+    lea_address = str_squish(str_remove(lea_address, "\\(.*$")), 
+    lea_street = str_remove_all(lea_address, glue(", {fixed(str_squish(City), ignore_case = T)}, AZ *\\d+")), 
+    lea_zip = str_extract(lea_address, "\\d{5} *$"), 
+    lea_state = "AZ", 
+    # Clean city names for matching across sources by replacin non-letter characters
+    clean_city = str_replace_all(tolower(str_squish(City)), "[^\\w]+", "_")
+    ) 
+
+
+
+# Review matches and missing values
+# View(count(city_data_final, clean_city, Latitude, Longitude))
+
+
+
+
+# Write a csv file for geocoding
+write.csv(
+  lea_addresses_clean[ , c("lea_street", "City", "lea_state", "lea_zip")], 
+  "lea_addresses_for_census.csv", 
+  col.names = FALSE)
+
+# Census Bureau
+system2(
+  command = "curl", 
+  args = c(
+    "form addressFile=@lea_addresses_for_census.csv", 
+    "form benchmark=2020 https://geocoding.geo.census.gov/geocoder/locations/addressbatch", 
+    "output geocoderesult.csv"
+  )
+)
+
+# Import School District Geocode data
+lea_geocodes <- read_csv(
+  "geocoderesult.csv", 
+  skip = 1, 
+  col_names = c(
+    "record", 
+    "original_addr", 
+    "match", 
+    "exact", 
+    "matched_addr", 
+    "lon_lat", 
+    "id", 
+    "rl"
+    ) 
+  ) %>% 
+  # Remove the comma after state code
+  mutate(original_addr = str_replace(original_addr, "AZ,", "AZ"))
+
+
+
+
+# Attribution. If I use it, I need to include the following attribution:
+# "This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau."
+saipe_vars <- listCensusMetadata(
+  name = "timeseries/poverty/saipe/schdist", 
+  type = "variables")
+View(saipe_vars)
+
+sahie_national <- getCensus(
+  key = keyring::key_get("CENSUS_KEY", "ssmith2@aguafria.org"),
+  name = "timeseries/poverty/saipe/schdist",
+  vars = c("SD_NAME", "YEAR", "GEOID", "STATE", "LEAID", "GEOCAT"), 
+  region = "state:*", 
+  regionin = "state:03")
+View(sahie_national)
+
+
+# Check city names for missing entries
+# unique(lea_addresses_clean$clean_city[!lea_addresses_clean$clean_city %in% cities_pop_df$clean_city])
+
+# Create a formatted dataframe of city data to use in app
+city_data_final <- cities_pop_df %>% 
+  left_join(city_geocodes, by = "clean_city") %>% 
+  select(name, clean_city, Latitude, Longitude, Year, Population, `Annual Growth Rate`) %>% 
+  distinct()
+
+write_csv(city_data_final, "enrollment_prediction_app/web/city_data_app.csv")
+
+# Create a formatted dataframe of enrollment data to use in app
+enrollment_data_final <- enrollment_all %>% 
+  left_join(select(lea_addresses_clean, -lea_name), by = "lea_entity_id") %>% 
+  left_join(lea_geocodes, present = TRUE, by = c("lea_address" = "original_addr")) %>% 
+  select(lea_entity_id, lea_name, lea_abbr, City, grade, students, fiscal_yr, lea_address, clean_city, lon_lat) %>% 
+  left_join(
+    distinct(
+      transmute(city_data_final, clean_city, city_lat = Latitude, city_lon = Longitude)
+      ), 
+    by = "clean_city"
+    ) %>% 
+  # split latitude and longitude into columns
+  separate(lon_lat, into = c("lon", "lat"), sep = ",", convert = TRUE) %>% 
+  arrange(lea_name)
+
+write_csv(enrollment_data_final, "enrollment_prediction_app/web/enroll_data_app.csv")
+# Inspect missing data in enrollment_data_final object
+# View(count(filter(enrollment_data_final, is.na(lon_lat), !is.na(lea_address)), lea_abbr, lea_entity_id, lea_address))
+# length((unique(enrollment_data_final$lea_entity_id[is.na(enrollment_data_final$lon_lat)])))
+# sum((lea_geocodes$match == "Match"))
+# check <- (count(distinct(enrollment_data_final, lea_address, present), lea_address, present))
+# sum(check$present, na.rm = T)
+# check$lea_address[!check$lea_address %in% lea_geocodes$original_addr]
 
