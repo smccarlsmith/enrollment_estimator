@@ -57,7 +57,8 @@ ui <- dashboardPage(
         #   choices = unique(super_saturday_feedback$topic_description)[!is.na(super_saturday_feedback$topic_description)],
         #   selected = unique(super_saturday_feedback$topic_description)[!is.na(super_saturday_feedback$topic_description)]
         # )
-        uiOutput("city_choices")
+        uiOutput("city_choices"), 
+        uiOutput("lea_choices")
       )
     )
   ), # end of sidebar

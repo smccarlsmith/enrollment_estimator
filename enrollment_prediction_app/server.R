@@ -16,10 +16,10 @@ library(shiny)
 shinyServer(function(input, output) {
   
   # Define the district colors
-  afuhsd_colors <- c(
-    "Priorities" = "#B31942", 
-    "Dreams" = "#0A3161", 
-    "Barriers" = "#FFFFFF")
+  # afuhsd_colors <- c(
+  #   "Priorities" = "#B31942", 
+  #   "Dreams" = "#0A3161", 
+  #   "Barriers" = "#FFFFFF")
   
   
   
@@ -45,34 +45,36 @@ shinyServer(function(input, output) {
   ) # End of datatable options 
   
   # Import all data sources -----
-  city_pops <- read_csv("web/cities_population.csv")
+  city_data <- read_csv("web/city_data_app.csv")
+  enroll_data <- read_csv("web/enroll_data_app.csv")
   
   # Import the super saturday data -----
-  letters_vect <- rev(LETTERS[1:14])
+  # letters_vect <- rev(LETTERS[1:14])
   # names(letters_vect) <- rev(1:length(letters_vect))
   
-  super_saturday_feedback <- read_csv("web/sup_sat_topic_modeling_final.csv") %>% 
-    replace_na(list(topic_name = "NA")) %>% 
-    mutate(topic = paste("Topic", topic)) %>% 
-    group_by(topic) %>% 
-    mutate(
-      n = 1, 
-      tot_resp = sum(n, na.rm = T)
-    ) %>% 
-    ungroup() %>% 
-    mutate(
-      topic = factor(topic),
-      topic = fct_reorder(topic, tot_resp, max)) %>% 
-    mutate(
-      # topic_name = paste(
-      #   "Topic", 
-      #   letters_vect[as.character(as.numeric(topic)+1)]
-      #        )
-      numeric_topic = as.numeric(topic),
-      topic_name = paste("Topic", letters_vect[numeric_topic])
-    )
+  # super_saturday_feedback <- read_csv("web/sup_sat_topic_modeling_final.csv") %>% 
+  #   replace_na(list(topic_name = "NA")) %>% 
+  #   mutate(topic = paste("Topic", topic)) %>% 
+  #   group_by(topic) %>% 
+  #   mutate(
+  #     n = 1, 
+  #     tot_resp = sum(n, na.rm = T)
+  #   ) %>% 
+  #   ungroup() %>% 
+  #   mutate(
+  #     topic = factor(topic),
+  #     topic = fct_reorder(topic, tot_resp, max)) %>% 
+  #   mutate(
+  #     # topic_name = paste(
+  #     #   "Topic", 
+  #     #   letters_vect[as.character(as.numeric(topic)+1)]
+  #     #        )
+  #     numeric_topic = as.numeric(topic),
+  #     topic_name = paste("Topic", letters_vect[numeric_topic])
+  #   )
   
-  city_choices <- sort(unique(city_pops$name))
+  city_choices <- sort(unique(city_data$name))
+  lea_choices <- sort(unique(enroll_data$lea_abbr))
   
   output$city_choices <- renderUI({
     # checkboxGroupInput(
@@ -86,6 +88,27 @@ shinyServer(function(input, output) {
       label = "Select Cities:",
       selected = c("Avondale", "Buckeye", "Goodyear", "Litchfield Park"),
       choices = city_choices,
+      options = list(
+        `actions-box` = TRUE, 
+        size = 10,
+        `selected-text-format` = "count > 3"
+      ), 
+      multiple = TRUE
+    )
+  })
+  
+  output$lea_choices <- renderUI({
+    # checkboxGroupInput(
+    #   inputId = "topics",
+    #   label = "Select Topics:",
+    #   choices = city_choices,
+    #   selected = city_choices
+    # )
+    pickerInput(
+      inputId = "districts",
+      label = "Select School District:",
+      selected = "Agua Fria UHSD",
+      choices = lea_choices,
       options = list(
         `actions-box` = TRUE, 
         size = 10,
