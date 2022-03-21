@@ -118,15 +118,108 @@ shinyServer(function(input, output) {
     )
   })
   
-  # Create a reactive Sup Sat data frame based on the input ----
+  # Create a reactive data frame for linear regression ----
+  ml_df <- reactive({
+    
+    filtered_enrollment <- enroll_data %>% 
+      filter(
+        lea_abbr %in% input$districts, 
+        grade == "total"
+      ) %>% 
+      group_by(fiscal_yr, pop_year) %>% 
+      summarise(tot_enrollment = sum(students, na.rm = T)) #%>% 
+    # left_join()
+    
+    filtered_population <- city_data %>% 
+      filter(
+        name %in% input$cities
+      ) %>% 
+      group_by(Year) %>% 
+      summarise(tot_pop = sum(Population, na.rm = T)) %>% 
+      left_join(filtered_enrollment, by = c("Year" = "pop_year"))
+    
+    return(filtered_population)
+    
+  }) # End of reactive dataframe for linear regression
+  
+  # Create a reactive frame based on the input ----
   filtered_responses <- reactive({
     # Get selected topics from input
-    selected_topics<-input$cities
+    # selected_topics<-input$cities
+    # selected_cities<-input$cities
     # Filter responses based on checkbox input
-    filtered_responses_df <- super_saturday_feedback %>% 
-      filter(topic_name %in% input$cities)
+    filtered_responses_df <- enroll_data %>% 
+      filter(
+        lea_abbr %in% input$districts, 
+        grade == "total"
+        ) %>% 
+      group_by(lea_entity_id, lea_abbr, fiscal_yr, pop_year) %>% 
+      summarise(tot_enrollment = sum(students, na.rm = T)) #%>% 
+      # left_join()
     
   }) # End of reactive Super Saturday responses 
+  
+  # Text of selected LEAs
+  output$lea_text <- renderText(glue_collapse(input$districts, sep = "; ")) 
+  
+  # Text of selected cities
+  output$cities_text <- renderText(
+    paste(
+      "based on population of ",
+      glue_collapse(input$cities, sep = "; ")
+      )
+    )
+  
+  # Output valuebox with estimated enrollment
+  # output$enrollment_value <- renderValueBox({
+  #   valueBox(
+  #     subtitle = "Estimated Enrollment ", 
+  #     # input$count,
+  #     value = 43,
+  #     icon = icon("credit-card")
+  #   )
+  # })
+  
+  output$enrollment_value <- renderValueBox({
+    
+    # Create linear regression model based on selections
+    train <- ml_df() 
+    
+    # Find the latest year of enrollment data (model will predict the following year)
+    prediction_yr <- max(train$fiscal_yr, na.rm = T) + 1
+
+    test <- dplyr::filter(train, Year == prediction_yr -1)
+    
+    model <- lm(tot_enrollment ~ tot_pop, train[complete.cases(train), ])
+
+    enrollment_prediction <- predict(model, newdata = test)
+    
+    valueBox(
+      subtitle = glue("FY {prediction_yr} Estimated Enrollment "), 
+      # input$count,
+      value = round(enrollment_prediction, 0),
+      icon = icon("credit-card")
+    )
+  })
+  
+  # Output the data to visualize during testing
+  # If this is useful, it can be a separate tab for exporting
+  output$table_of_data <- renderDT({
+    
+    data_for_table <- filtered_responses()
+    
+    enroll_pop_dt <- data_for_table %>% 
+      datatable(rownames = FALSE, extensions = c('Buttons'), options = dt_options, filter = 'top')
+    
+  })
+  
+  # Create a table to display the underlying data for the linear regression model
+  output$ml_data_dt <- renderDT({
+    
+    ml_df_dt <- ml_df() %>% 
+      datatable(rownames = FALSE, extensions = c('Buttons'), options = dt_options, filter = 'top')
+    
+  })
   
   
   output$topics_plot <- renderPlotly({

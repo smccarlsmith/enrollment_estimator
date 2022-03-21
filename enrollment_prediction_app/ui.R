@@ -17,8 +17,27 @@ library(tools)
 # Tab with dreams, priorities, barriers visuals
 super_sat_tab <- tabItem(
   "sat_tab", 
+  h3("Estimated Enrollment for:"), 
+  h3(textOutput("lea_text")),
+  h4(textOutput("cities_text")),
   fluidRow(
-    box() 
+    column(
+      box(
+        # actionButton("count", "Count"),
+        valueBoxOutput("enrollment_value", width = 12),
+        width = 6 # Width of Value box
+      ),
+      box(
+        width = 6 # Width of plot
+      ),
+      width = 8 # Column width
+    ), 
+    column(
+      box(
+        width = 12
+      ),
+      width = 4
+    )
   ) # End of top row
    # End of bottom row
 )
@@ -33,7 +52,12 @@ acad_summit_tab <- tabItem(
   fluidRow()
 )
 # Tab for All Data Sources
-all_sources_tab <- tabItem("all_data_tab")
+all_sources_tab <- tabItem(
+  "all_data_tab", 
+  fluidRow(
+    box(dataTableOutput("ml_data_dt"), width = 12)
+    )
+  )
 
 # Define UI for application that draws a histogram
 ui <- dashboardPage(
@@ -48,7 +72,7 @@ ui <- dashboardPage(
       menuItem("Super Saturday", tabName = "sat_tab"), 
       # menuItem("SBG Survey", tabName = "sbg_tab"),
       # menuItem("All Data Sources", tabName = "all_data_tab"), 
-      menuItem("Full Data Sources", tabName = "summit_tab"),
+      menuItem("Full Data Sources", tabName = "all_data_tab"),
       conditionalPanel(
         'input.sidebar == "sat_tab"', 
         # checkboxGroupInput(
@@ -67,9 +91,10 @@ ui <- dashboardPage(
   body = dashboardBody(
     tabItems(
       super_sat_tab, 
-      listening_tab, 
-      sbg_survey_tab, 
-      acad_summit_tab
+      # listening_tab, 
+      # sbg_survey_tab, 
+      # acad_summit_tab, 
+      all_sources_tab
     )
   ), # end of body
   
