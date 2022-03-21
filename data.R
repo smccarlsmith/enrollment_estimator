@@ -426,6 +426,9 @@ enrollment_data_final <- enrollment_all %>%
     ) %>% 
   # split latitude and longitude into columns
   separate(lon_lat, into = c("lon", "lat"), sep = ",", convert = TRUE) %>% 
+  # I'll be building prediction based on population numbers 2 years prior to the fiscal year
+  # Create a column to join accordingly
+  mutate(pop_year = fiscal_yr - 1) %>% 
   arrange(lea_name)
 
 write_csv(enrollment_data_final, "enrollment_prediction_app/web/enroll_data_app.csv")
