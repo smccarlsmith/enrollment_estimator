@@ -199,34 +199,31 @@ shinyServer(function(input, output) {
   
   output$enrollment_value <- renderValueBox({
     
-    # Create linear regression model based on selections
-    # train <- ml_df() 
-    # 
-    # # Find the latest year of enrollment data (model will predict the following year)
-    # prediction_yr <- max(train$fiscal_yr, na.rm = T) + 1
-    # 
-    # test <- dplyr::filter(train, Year == prediction_yr -1)
-    # 
-    # model <- lm(tot_enrollment ~ tot_pop, train[complete.cases(train), ])
-    # 
-    # enrollment_prediction <- predict(model, newdata = test)
+    if(all(is.na(input$districts))|all(is.na(input$cities))){
+      
+      valueBox(
+        # subtitle = glue("FY {prediction_yr} Estimated Enrollment "), 
+        subtitle = "Select Cities, LEA to estimate", 
+        value = "____",
+        icon = icon("exclamation-circle"), 
+        color = "red"
+      )
+      
+    } else {
+      
+      valueBox(
+        # subtitle = glue("FY {prediction_yr} Estimated Enrollment "), 
+        subtitle = glue("Estimated Enrollment "), 
+        value = as.character(round(predicted_enrollment(), 0)),
+        icon = icon("users"), 
+        color = "green"
+      )
+      
+    }
     
-    valueBox(
-      # subtitle = glue("FY {prediction_yr} Estimated Enrollment "), 
-      subtitle = ifelse(
-        all(is.na(input$districts))|all(is.na(input$cities)),
-        "Select Cities, LEA to estimate",
-        glue("Estimated Enrollment ")
-        ), 
-      # input$count,
-      # value = round(enrollment_prediction, 0),
-      value = ifelse(
-        all(is.na(input$districts))|all(is.na(input$cities)),
-        "____",
-        as.character(round(predicted_enrollment(), 0))
-        ),
-      icon = icon("users")
-    )
+    
+    
+    
   })
   
   # Output the data to visualize during testing
