@@ -110,13 +110,18 @@ shinyServer(function(input, output) {
       selected = "Agua Fria UHSD",
       choices = lea_choices,
       options = list(
-        `actions-box` = TRUE, 
+        `actions-box` = TRUE,
+        liveSearch = TRUE,
+        # liveSearchPlaceholder = "Type LEA Name",
+        # mobile = TRUE,
         size = 10,
         `selected-text-format` = "count > 3"
       ), 
       multiple = TRUE
     )
   })
+  
+ 
   
   # Create a reactive data frame for linear regression ----
   ml_df <- reactive({
@@ -141,24 +146,7 @@ shinyServer(function(input, output) {
     return(filtered_population)
     
   }) # End of reactive dataframe for linear regression
-  
-  # Create a reactive frame based on the input ----
-  filtered_responses <- reactive({
-    # Get selected topics from input
-    # selected_topics<-input$cities
-    # selected_cities<-input$cities
-    # Filter responses based on checkbox input
-    filtered_responses_df <- enroll_data %>% 
-      filter(
-        lea_abbr %in% input$districts, 
-        grade == "total"
-        ) %>% 
-      group_by(lea_entity_id, lea_abbr, fiscal_yr, pop_year) %>% 
-      summarise(tot_enrollment = sum(students, na.rm = T)) #%>% 
-      # left_join()
-    
-  }) # End of reactive Super Saturday responses 
-  
+
   # Text of selected LEAs
   output$lea_text <- renderText(glue_collapse(input$districts, sep = "; ")) 
   
@@ -180,27 +168,40 @@ shinyServer(function(input, output) {
   #   )
   # })
   
-  predicted_enrollment <- reactive({
+  lm_model <- reactive({
     
     train <- ml_df() 
     
     # Find the latest year of enrollment data (model will predict the following year)
     prediction_yr <- max(train$fiscal_yr, na.rm = T) + 1
     
-    test <- dplyr::filter(train, Year == prediction_yr -1)
-    
     model <- lm(tot_enrollment ~ tot_pop, train[complete.cases(train), ])
     
-    enrollment_prediction <- predict(model, newdata = test)
+    return(model)
+  })
+  
+  
+  predicted_enrollment <- reactive({
+    
+    train <- ml_df()
+    
+    # Find the latest year of enrollment data (model will predict the following year)
+    prediction_yr <- max(train$fiscal_yr, na.rm = T) + 1
+    # 
+    test <- dplyr::filter(train, Year == prediction_yr -1)
+    # 
+    # model <- lm(tot_enrollment ~ tot_pop, train[complete.cases(train), ])
+    
+    enrollment_prediction <- predict(lm_model(), newdata = test)
     
     return(enrollment_prediction)
     
   })
   
+  # Value box definition -----
   output$enrollment_value <- renderValueBox({
     
     if(all(is.na(input$districts))|all(is.na(input$cities))){
-      
       valueBox(
         # subtitle = glue("FY {prediction_yr} Estimated Enrollment "), 
         subtitle = "Select Cities, LEA to estimate", 
@@ -208,9 +209,7 @@ shinyServer(function(input, output) {
         icon = icon("exclamation-circle"), 
         color = "red"
       )
-      
     } else {
-      
       valueBox(
         # subtitle = glue("FY {prediction_yr} Estimated Enrollment "), 
         subtitle = glue("Estimated Enrollment "), 
@@ -218,19 +217,45 @@ shinyServer(function(input, output) {
         icon = icon("users"), 
         color = "green"
       )
-      
     }
     
+  }) # End of value box definition
+  
+  # Create a dataframe based on the model
+  fit <- reactive({
+    fit_df <- augment(lm_model())
+  })
+  
+  # Create plot of regression trend
+  output$regression_plot <- renderHighchart({
     
+    fit2 <- fit()
     
+    fit2 %>% 
+      # fit() %>% 
+      #       left_join(ml_df(), by = c("tot_pop", "tot_enrollment")) %>%
+      hchart('scatter', hcaes(x = tot_pop, y = tot_enrollment)) %>%
+      hc_add_series(
+        fit2, 
+        type = "line", hcaes(x = tot_pop, y = .fitted),
+        name = "Fit", id = "fit"
+      )
     
   })
+  
+  output$chart1 <- renderHighchart({
+    
+    highcharts_demo()
+    
+  })
+  
   
   # Output the data to visualize during testing
   # If this is useful, it can be a separate tab for exporting
   output$table_of_data <- renderDT({
     
-    data_for_table <- filtered_responses()
+    data_for_table <- ml_df()
+    # data_for_table <- fit()
     
     enroll_pop_dt <- data_for_table %>% 
       datatable(rownames = FALSE, extensions = c('Buttons'), options = dt_options, filter = 'top')
@@ -240,7 +265,10 @@ shinyServer(function(input, output) {
   # Create a table to display the underlying data for the linear regression model
   output$ml_data_dt <- renderDT({
     
-    ml_df_dt <- ml_df() %>% 
+    # ml_df_dt <- ml_df() %>% 
+    ml_df_dt <- fit() %>% 
+      left_join(ml_df(), by = c("tot_pop", "tot_enrollment")) %>% 
+      select(Year, fiscal_yr, everything()) %>%
       datatable(rownames = FALSE, extensions = c('Buttons'), options = dt_options, filter = 'top')
     
   })
