@@ -10,6 +10,8 @@ library(wordcloud2)
 library(tidytext)
 library(tm)
 library(tools)
+library(broom)
+library(highcharter)
 
 # library(ggrepel)
 # library(highcharter)
@@ -28,6 +30,7 @@ super_sat_tab <- tabItem(
         width = 6 # Width of Value box
       ),
       box(
+        highchartOutput("regression_plot"),
         width = 6 # Width of plot
       ),
       width = 8 # Column width
@@ -59,6 +62,20 @@ all_sources_tab <- tabItem(
     )
   )
 
+pop_yr_tab <- tabItem(
+  "pop_yr_tab", 
+  fluidRow(
+    box(dataTableOutput("table_of_data"), width = 12)
+  )
+)
+
+chart_tab <- tabItem(
+  "chart_tab",
+  fluidRow(
+    box(highchartOutput("chart1"), width = 12)
+  )
+)
+
 # Define UI for application that draws a histogram
 ui <- dashboardPage(
   
@@ -73,6 +90,8 @@ ui <- dashboardPage(
       # menuItem("SBG Survey", tabName = "sbg_tab"),
       # menuItem("All Data Sources", tabName = "all_data_tab"), 
       menuItem("Full Data Sources", tabName = "all_data_tab"),
+      menuItem("Pop and Year", tabName = "pop_yr_tab"),
+      menuItem("Chart Example", tabName = "chart_tab"),
       conditionalPanel(
         'input.sidebar == "sat_tab"', 
         # checkboxGroupInput(
@@ -94,7 +113,10 @@ ui <- dashboardPage(
       # listening_tab, 
       # sbg_survey_tab, 
       # acad_summit_tab, 
-      all_sources_tab
+      all_sources_tab, 
+      chart_tab,
+      pop_yr_tab 
+      
     )
   ), # end of body
   
