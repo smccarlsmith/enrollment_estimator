@@ -440,3 +440,21 @@ write_csv(enrollment_data_final, "enrollment_prediction_app/web/enroll_data_app.
 # sum(check$present, na.rm = T)
 # check$lea_address[!check$lea_address %in% lea_geocodes$original_addr]
 
+# Create sample data for map visualization
+geo_data <- tibble(
+  longi = sample(seq(-112.5624, -112.1499, by = 0.0001), size = 9200, replace = TRUE), 
+  lati = sample(seq(33.32519, 33.61762, by = 0.00001), size = 9200, replace = FALSE)
+) %>% 
+  transmute(
+    record = 0, 
+    original_addr = "", 
+    matched_ind = "", 
+    match_type = "", 
+    matched_address = glue("Address {row_number()}"), 
+    lon = longi, 
+    lat = lati, 
+    indicator = ""
+  )
+
+write_csv(geo_data, "enrollment_prediction_app/web/afuhsd_sample_geo_data.csv")
+
