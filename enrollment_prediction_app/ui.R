@@ -12,6 +12,8 @@ library(tm)
 library(tools)
 library(broom)
 library(highcharter)
+library(leaflet)
+library(leaflet.extras)
 
 # library(ggrepel)
 # library(highcharter)
@@ -24,22 +26,33 @@ super_sat_tab <- tabItem(
   h4(textOutput("cities_text")),
   fluidRow(
     column(
-      box(
+      # box(
         # actionButton("count", "Count"),
         valueBoxOutput("enrollment_value", width = 12),
-        width = 6 # Width of Value box
-      ),
+        # width = 6 # Width of Value box
+      # ),
       box(
         highchartOutput("regression_plot"),
-        width = 6 # Width of plot
+        width = 12 # Width of plot
       ),
-      width = 8 # Column width
+      box(
+        highchartOutput("enr_time"),
+        width = 12 # Width of plot
+      ),
+      width = 6 # Column width
     ), 
     column(
       box(
+        leafletOutput("map"), 
+        fileInput("geocode_file", "Choose CSV File",
+                  accept = c(
+                    "text/csv",
+                    "text/comma-separated-values,text/plain",
+                    ".csv")
+        ),
         width = 12
       ),
-      width = 4
+      width = 6
     )
   ) # End of top row
    # End of bottom row
@@ -58,7 +71,8 @@ acad_summit_tab <- tabItem(
 all_sources_tab <- tabItem(
   "all_data_tab", 
   fluidRow(
-    box(dataTableOutput("ml_data_dt"), width = 12)
+    # box(dataTableOutput("ml_data_dt"), width = 12)
+    box(dataTableOutput("all_sources_dt"), width = 12)
     )
   )
 
@@ -72,7 +86,8 @@ pop_yr_tab <- tabItem(
 chart_tab <- tabItem(
   "chart_tab",
   fluidRow(
-    box(highchartOutput("chart1"), width = 12)
+    # box(highchartOutput("chart1"), width = 12)
+    # box(leafletOutput("map"), width = 12)
   )
 )
 
