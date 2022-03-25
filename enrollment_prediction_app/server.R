@@ -45,8 +45,34 @@ shinyServer(function(input, output) {
   ) # End of datatable options 
   
   # Import all data sources -----
-  city_data <- read_csv("web/city_data_app.csv")
+  city_data <- read_csv("web/city_data_app.csv") 
   enroll_data <- read_csv("web/enroll_data_app.csv")
+  afuhsd_geo_data <- read_csv("web/afuhsd_sample_geo_data.csv") %>% 
+    distinct() %>% 
+    bind_rows(
+      tibble(
+        matched_address = "AFUHSD: 1481 N Eliseo Felix Jr Way, Avondale, AZ, 85323", 
+        lon = -112.3368, 
+        lat = 33.44049
+        )
+    )
+  # Create a dataframe with resolved latitude and longitude for each lea; missing values replaced with Phoenix coordinates
+  resolved_lea_geo <- enroll_data %>% 
+    distinct(lea_abbr, City, lon, lat, city_lon, city_lat) %>% 
+    mutate(
+      res_lat = case_when(
+        is.na(lat) & is.na(city_lat) ~ 33.57,
+        is.na(lat) ~ city_lat, 
+        TRUE ~ lat
+        ), 
+      res_lon = case_when(
+        is.na(lon) & is.na(city_lon) ~ -112.09,
+        is.na(lon) ~ city_lon, 
+        TRUE ~ lon
+        )
+      ) %>% 
+    select(-(lon:city_lon)) %>% 
+    rename("lat" = "res_lat", "lon" = "res_lon")
   
   # Import the super saturday data -----
   # letters_vect <- rev(LETTERS[1:14])
@@ -226,7 +252,7 @@ shinyServer(function(input, output) {
     fit_df <- augment(lm_model())
   })
   
-  # Create plot of regression trend
+  # Create plot of regression trend ---
   output$regression_plot <- renderHighchart({
     
     fit2 <- fit()
@@ -242,6 +268,20 @@ shinyServer(function(input, output) {
       )
     
   })
+  
+  # Create plot of enrollment over time----
+  output$enr_time <- renderHighchart({
+    
+    fit3 <- fit()
+    ml_df2 <- ml_df()
+    
+    fit3 %>% 
+      left_join(ml_df2, by = c("tot_pop", "tot_enrollment")) %>%
+      hchart('line', hcaes(x = fiscal_yr, y = tot_enrollment), 
+             name = "Enrollment", id = "enrollment")
+    
+  })
+  
   
   output$chart1 <- renderHighchart({
     
@@ -349,39 +389,13 @@ shinyServer(function(input, output) {
     
   })
   
-  # Create data table of Super Saturday feedback ----
-  output$sup_sat_dt <- renderDataTable({
-    
-    sup_sat_DT <- filtered_responses()
-    
-    dt_for_sup_sat <- sup_sat_DT %>% 
-      select(area, sentence, topic_name) %>% 
-      mutate(
-        area = factor(
-          area, 
-          ordered = T, 
-          levels = c("Dreams", "Priorities", "Barriers")
-        ), 
-        topic_name = factor(topic_name)
-      ) %>% 
-      arrange(topic_name, area) %>% 
-      rename(
-        "Area" = "area", 
-        "Response" = "sentence", 
-        "Topic" = "topic_name"
-      ) %>% 
-      datatable(rownames = FALSE, extensions = c('Buttons'), options = dt_options, filter = 'top')
-    
-    
-  }) # End of Super Saturday data table
-  
   # Create a data table of all sources ----
   output$all_sources_dt <- renderDataTable({
     
     names(city_pops) <- toTitleCase(names(city_pops))
     
     city_pops %>% 
-      select(Source, Area, Response) %>% 
+      # select(Source, Area, Response) %>% 
       mutate(
         Area = factor(
           Area, 
@@ -391,6 +405,107 @@ shinyServer(function(input, output) {
       ) %>% 
       # arrange(Source, Area) %>% 
       datatable(rownames = FALSE, extensions = c('Buttons'), options = dt_options, filter = 'top')
+    
+  })
+  
+  geocoded_addresses <- reactive({
+    header <- afuhsd_geo_data[0, ]
+    
+    if(is.null(input$geocode_file) & input$districts == "Agua Fria UHSD"){
+      return(afuhsd_geo_data)
+    } else if (is.null(input$geocode_file)){
+      return(bind_rows(header, filter(resolved_lea_geo, lea_abbr %in% input$districts)))
+    } else {
+      file_upload <- input$geocode_file
+      
+      return(
+        bind_rows(
+          header,
+          read_csv(file_upload$datapath)
+        )
+        )
+    }
+  })
+  
+  # Create a map widget
+  output$map <- renderLeaflet({
+    
+    coords_for_map <- geocoded_addresses()
+    
+    # define map bounds
+    lon_zoom <- median(coords_for_map$lon, na.rm = T)
+    lat_zoom <- median(coords_for_map$lat, na.rm = T)
+    
+    # import shape objects
+    # If I can find the shape files for other districts, I'll need to make this dynamic
+    afhs_kml <- readr::read_file("web/boundaries/AFHS Boundaries.kml")
+    cvhs_kml <- readr::read_file("web/boundaries/CVHS Boundaries.kml")
+    dehs_kml <- readr::read_file("web/boundaries/DEHS Boundaries.kml")
+    mhs_kml <- readr::read_file("web/boundaries/MHS Boundaries.kml")
+    vhs_kml <- readr::read_file("web/boundaries/VHS Boundaries.kml")
+    
+    # create map
+    # Plot feeder school students and show school boundaries
+    awesome <- makeAwesomeIcon(
+      icon = "info",
+      iconColor = "black",
+      markerColor = "blue",
+      library = "fa"
+    )
+    
+    
+    # Working boundaries
+    leaflet(distinct(coords_for_map)) %>% 
+      # flyToBounds(
+      setView(
+        lon_zoom, 
+        lat_zoom
+        , zoom = 11
+        ) %>%
+      # addProviderTiles(providers$CartoDB.Positron) %>%
+      addTiles() %>% 
+      addAwesomeMarkers(
+        ~lon, 
+        ~lat,
+        icon = awesome,
+        # icon = school_icons,
+        clusterOptions = markerClusterOptions(),
+        popup = ~paste(matched_address, "\n", lat, ", ", lon),
+        # popup = ~matched_address,
+        label = ~matched_address
+        # label = ~paste(matched_address, "\n", lat, ", ", lon)
+      ) %>% 
+      # addWebGLKMLHeatmap(kml, size = 20, units = "px") %>%
+      addKML(
+        afhs_kml,
+        markerType = "circleMarker",
+        stroke = FALSE, fillColor = "red", fillOpacity = 0.5,
+        markerOptions = markerOptions(radius = 1)
+      ) %>% 
+      addKML(
+        dehs_kml,
+        markerType = "circleMarker",
+        stroke = FALSE, fillColor = "orange", fillOpacity = 0.5,
+        markerOptions = markerOptions(radius = 1)
+      )%>% 
+      addKML(
+        cvhs_kml,
+        markerType = "circleMarker",
+        stroke = FALSE, fillColor = "blue", fillOpacity = 0.5,
+        markerOptions = markerOptions(radius = 1)
+      )%>% 
+      addKML(
+        mhs_kml,
+        markerType = "circleMarker",
+        stroke = FALSE, fillColor = "purple", fillOpacity = 0.5,
+        markerOptions = markerOptions(radius = 1)
+      )%>% 
+      addKML(
+        vhs_kml,
+        markerType = "circleMarker",
+        stroke = FALSE, fillColor = "yellow", fillOpacity = 0.5,
+        markerOptions = markerOptions(radius = 1)
+      )
     
   })
   
