@@ -4,6 +4,94 @@ output: html_notebook
 ---
 
 ```{r}
+library(visdat)
+```
+
+
+```{r}
 city_pops <- read_csv("web/cities_population.csv.csv")
+afuhsd_geo_data <- read_csv("enrollment_prediction_app/web/afuhsd_sample_geo_data.csv") %>% 
+  distinct() %>% 
+    bind_rows(
+      tibble(
+        matched_address = "AFUHSD: 1481 N Eliseo Felix Jr Way, Avondale, AZ, 85323", 
+        lon = -112.3368, 
+        lat = 33.44049
+        )
+    )
+```
+
+
+```{r}
+city_data <- read_csv("enrollment_prediction_app/web/city_data_app.csv")
+enroll_data <- read_csv("enrollment_prediction_app/web/enroll_data_app.csv")
+train <- read_csv("sample_enrollment_delete.csv")
+
+test <- distinct(enroll_data, lea_abbr, City, lon, lat, city_lon, city_lat) %>% 
+  arrange(lon, city_lon)
+vis_miss(test)
+```
+
+```{r}
+prediction_yr <- max(train$fiscal_yr, na.rm = T) + 1
+    
+    test <- dplyr::filter(train, Year == prediction_yr -1)
+    
+    model <- lm(tot_enrollment ~ tot_pop, train[complete.cases(train), ])
+    
+    enrollment_prediction <- predict(model, newdata = test)
+```
+
+```{r}
+# Fit regression model
+library(dplyr)
+library(broom)
+
+data("mtcars")
+df <- mtcars
+
+df$cyl <- as.factor(df$cyl)
+
+model <- lm(mpg ~ wt, data = df)
+fit <- augment(model) %>% arrange(wt)
+
+# Visualization
+hc <- df %>% 
+  hchart('scatter', hcaes(x = wt, y = mpg, group = cyl)) %>%
+  hc_add_series(
+    fit, type = "line", hcaes(x = wt, y = .fitted),
+    name = "Fit", id = "fit"
+    ) 
+
+hc
+```
+```{r}
+fit2 <- read_csv("fit_sample.csv")
+
+fit2 %>% 
+# fit() %>% 
+#       left_join(ml_df(), by = c("tot_pop", "tot_enrollment")) %>%
+      hchart('scatter', hcaes(x = tot_pop, y = tot_enrollment)) %>%
+      hc_add_series(
+        fit2, 
+        type = "line", hcaes(x = tot_pop, y = .fitted),
+        name = "Fit", id = "fit"
+      )
+
+```
+```{r}
+fit3 <- select(fit2, -c(Year, fiscal_yr))
+    ml_df2 <- read_csv("ml_df_sample_delete.csv")
+    
+    fit3 %>% 
+      # fit() %>% 
+      left_join(ml_df2, by = c("tot_pop", "tot_enrollment")) %>%
+      hchart('line', hcaes(x = fiscal_yr, y = tot_enrollment), 
+             name = "Enrollment", id = "enrollment") #%>%
+      # hc_add_series(
+      #   left_join(fit3, ml_df2, by = c("tot_pop", "tot_enrollment")), 
+      #   type = "line", hcaes(x = fiscal_yr, y = tot_pop),
+      #   name = "Enrollment", id = "enrollment"
+      # )
 ```
 
