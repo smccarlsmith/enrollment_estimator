@@ -45,8 +45,34 @@ shinyServer(function(input, output) {
   ) # End of datatable options 
   
   # Import all data sources -----
-  city_data <- read_csv("web/city_data_app.csv")
+  city_data <- read_csv("web/city_data_app.csv") 
   enroll_data <- read_csv("web/enroll_data_app.csv")
+  afuhsd_geo_data <- read_csv("web/afuhsd_sample_geo_data.csv") %>% 
+    distinct() %>% 
+    bind_rows(
+      tibble(
+        matched_address = "AFUHSD: 1481 N Eliseo Felix Jr Way, Avondale, AZ, 85323", 
+        lon = -112.3368, 
+        lat = 33.44049
+      )
+    )
+  # Create a dataframe with resolved latitude and longitude for each lea; missing values replaced with Phoenix coordinates
+  resolved_lea_geo <- enroll_data %>% 
+    distinct(lea_abbr, City, lon, lat, city_lon, city_lat) %>% 
+    mutate(
+      res_lat = case_when(
+        is.na(lat) & is.na(city_lat) ~ 33.57,
+        is.na(lat) ~ city_lat, 
+        TRUE ~ lat
+      ), 
+      res_lon = case_when(
+        is.na(lon) & is.na(city_lon) ~ -112.09,
+        is.na(lon) ~ city_lon, 
+        TRUE ~ lon
+      )
+    ) %>% 
+    select(-(lon:city_lon)) %>% 
+    rename("lat" = "res_lat", "lon" = "res_lon")
   
   # Import the super saturday data -----
   # letters_vect <- rev(LETTERS[1:14])
@@ -110,13 +136,18 @@ shinyServer(function(input, output) {
       selected = "Agua Fria UHSD",
       choices = lea_choices,
       options = list(
-        `actions-box` = TRUE, 
+        `actions-box` = TRUE,
+        liveSearch = TRUE,
+        # liveSearchPlaceholder = "Type LEA Name",
+        # mobile = TRUE,
         size = 10,
         `selected-text-format` = "count > 3"
       ), 
       multiple = TRUE
     )
   })
+  
+  
   
   # Create a reactive data frame for linear regression ----
   ml_df <- reactive({
@@ -142,23 +173,6 @@ shinyServer(function(input, output) {
     
   }) # End of reactive dataframe for linear regression
   
-  # Create a reactive frame based on the input ----
-  filtered_responses <- reactive({
-    # Get selected topics from input
-    # selected_topics<-input$cities
-    # selected_cities<-input$cities
-    # Filter responses based on checkbox input
-    filtered_responses_df <- enroll_data %>% 
-      filter(
-        lea_abbr %in% input$districts, 
-        grade == "total"
-        ) %>% 
-      group_by(lea_entity_id, lea_abbr, fiscal_yr, pop_year) %>% 
-      summarise(tot_enrollment = sum(students, na.rm = T)) #%>% 
-      # left_join()
-    
-  }) # End of reactive Super Saturday responses 
-  
   # Text of selected LEAs
   output$lea_text <- renderText(glue_collapse(input$districts, sep = "; ")) 
   
@@ -167,8 +181,8 @@ shinyServer(function(input, output) {
     paste(
       "based on population of ",
       glue_collapse(input$cities, sep = "; ")
-      )
     )
+  )
   
   # Output valuebox with estimated enrollment
   # output$enrollment_value <- renderValueBox({
@@ -180,33 +194,108 @@ shinyServer(function(input, output) {
   #   )
   # })
   
-  output$enrollment_value <- renderValueBox({
+  lm_model <- reactive({
     
-    # Create linear regression model based on selections
     train <- ml_df() 
     
     # Find the latest year of enrollment data (model will predict the following year)
     prediction_yr <- max(train$fiscal_yr, na.rm = T) + 1
-
-    test <- dplyr::filter(train, Year == prediction_yr -1)
     
     model <- lm(tot_enrollment ~ tot_pop, train[complete.cases(train), ])
-
-    enrollment_prediction <- predict(model, newdata = test)
     
-    valueBox(
-      subtitle = glue("FY {prediction_yr} Estimated Enrollment "), 
-      # input$count,
-      value = round(enrollment_prediction, 0),
-      icon = icon("credit-card")
-    )
+    return(model)
   })
+  
+  
+  predicted_enrollment <- reactive({
+    
+    train <- ml_df()
+    
+    # Find the latest year of enrollment data (model will predict the following year)
+    prediction_yr <- max(train$fiscal_yr, na.rm = T) + 1
+    # 
+    test <- dplyr::filter(train, Year == prediction_yr -1)
+    # 
+    # model <- lm(tot_enrollment ~ tot_pop, train[complete.cases(train), ])
+    
+    enrollment_prediction <- predict(lm_model(), newdata = test)
+    
+    return(enrollment_prediction)
+    
+  })
+  
+  # Value box definition -----
+  output$enrollment_value <- renderValueBox({
+    
+    if(all(is.na(input$districts))|all(is.na(input$cities))){
+      valueBox(
+        # subtitle = glue("FY {prediction_yr} Estimated Enrollment "), 
+        subtitle = "Select Cities, LEA to estimate", 
+        value = "____",
+        icon = icon("exclamation-circle"), 
+        color = "red"
+      )
+    } else {
+      valueBox(
+        # subtitle = glue("FY {prediction_yr} Estimated Enrollment "), 
+        subtitle = glue("Estimated Enrollment "), 
+        value = as.character(round(predicted_enrollment(), 0)),
+        icon = icon("users"), 
+        color = "green"
+      )
+    }
+    
+  }) # End of value box definition
+  
+  # Create a dataframe based on the model
+  fit <- reactive({
+    fit_df <- augment(lm_model())
+  })
+  
+  # Create plot of regression trend ---
+  output$regression_plot <- renderHighchart({
+    
+    fit2 <- fit()
+    
+    fit2 %>% 
+      # fit() %>% 
+      #       left_join(ml_df(), by = c("tot_pop", "tot_enrollment")) %>%
+      hchart('scatter', hcaes(x = tot_pop, y = tot_enrollment)) %>%
+      hc_add_series(
+        fit2, 
+        type = "line", hcaes(x = tot_pop, y = .fitted),
+        name = "Fit", id = "fit"
+      )
+    
+  })
+  
+  # Create plot of enrollment over time----
+  output$enr_time <- renderHighchart({
+    
+    fit3 <- fit()
+    ml_df2 <- ml_df()
+    
+    fit3 %>% 
+      left_join(ml_df2, by = c("tot_pop", "tot_enrollment")) %>%
+      hchart('line', hcaes(x = fiscal_yr, y = tot_enrollment), 
+             name = "Enrollment", id = "enrollment")
+    
+  })
+  
+  
+  output$chart1 <- renderHighchart({
+    
+    highcharts_demo()
+    
+  })
+  
   
   # Output the data to visualize during testing
   # If this is useful, it can be a separate tab for exporting
   output$table_of_data <- renderDT({
     
-    data_for_table <- filtered_responses()
+    data_for_table <- ml_df()
+    # data_for_table <- fit()
     
     enroll_pop_dt <- data_for_table %>% 
       datatable(rownames = FALSE, extensions = c('Buttons'), options = dt_options, filter = 'top')
@@ -216,7 +305,10 @@ shinyServer(function(input, output) {
   # Create a table to display the underlying data for the linear regression model
   output$ml_data_dt <- renderDT({
     
-    ml_df_dt <- ml_df() %>% 
+    # ml_df_dt <- ml_df() %>% 
+    ml_df_dt <- fit() %>% 
+      left_join(ml_df(), by = c("tot_pop", "tot_enrollment")) %>% 
+      select(Year, fiscal_yr, everything()) %>%
       datatable(rownames = FALSE, extensions = c('Buttons'), options = dt_options, filter = 'top')
     
   })
@@ -297,39 +389,13 @@ shinyServer(function(input, output) {
     
   })
   
-  # Create data table of Super Saturday feedback ----
-  output$sup_sat_dt <- renderDataTable({
-    
-    sup_sat_DT <- filtered_responses()
-    
-    dt_for_sup_sat <- sup_sat_DT %>% 
-      select(area, sentence, topic_name) %>% 
-      mutate(
-        area = factor(
-          area, 
-          ordered = T, 
-          levels = c("Dreams", "Priorities", "Barriers")
-        ), 
-        topic_name = factor(topic_name)
-      ) %>% 
-      arrange(topic_name, area) %>% 
-      rename(
-        "Area" = "area", 
-        "Response" = "sentence", 
-        "Topic" = "topic_name"
-      ) %>% 
-      datatable(rownames = FALSE, extensions = c('Buttons'), options = dt_options, filter = 'top')
-    
-    
-  }) # End of Super Saturday data table
-  
   # Create a data table of all sources ----
   output$all_sources_dt <- renderDataTable({
     
     names(city_pops) <- toTitleCase(names(city_pops))
     
     city_pops %>% 
-      select(Source, Area, Response) %>% 
+      # select(Source, Area, Response) %>% 
       mutate(
         Area = factor(
           Area, 
@@ -339,6 +405,107 @@ shinyServer(function(input, output) {
       ) %>% 
       # arrange(Source, Area) %>% 
       datatable(rownames = FALSE, extensions = c('Buttons'), options = dt_options, filter = 'top')
+    
+  })
+  
+  geocoded_addresses <- reactive({
+    header <- afuhsd_geo_data[0, ]
+    
+    if(is.null(input$geocode_file) & input$districts == "Agua Fria UHSD"){
+      return(afuhsd_geo_data)
+    } else if (is.null(input$geocode_file)){
+      return(bind_rows(header, filter(resolved_lea_geo, lea_abbr %in% input$districts)))
+    } else {
+      file_upload <- input$geocode_file
+      
+      return(
+        bind_rows(
+          header,
+          read_csv(file_upload$datapath)
+        )
+      )
+    }
+  })
+  
+  # Create a map widget
+  output$map <- renderLeaflet({
+    
+    coords_for_map <- geocoded_addresses()
+    
+    # define map bounds
+    lon_zoom <- median(coords_for_map$lon, na.rm = T)
+    lat_zoom <- median(coords_for_map$lat, na.rm = T)
+    
+    # import shape objects
+    # If I can find the shape files for other districts, I'll need to make this dynamic
+    afhs_kml <- readr::read_file("web/boundaries/AFHS Boundaries.kml")
+    cvhs_kml <- readr::read_file("web/boundaries/CVHS Boundaries.kml")
+    dehs_kml <- readr::read_file("web/boundaries/DEHS Boundaries.kml")
+    mhs_kml <- readr::read_file("web/boundaries/MHS Boundaries.kml")
+    vhs_kml <- readr::read_file("web/boundaries/VHS Boundaries.kml")
+    
+    # create map
+    # Plot feeder school students and show school boundaries
+    awesome <- makeAwesomeIcon(
+      icon = "info",
+      iconColor = "black",
+      markerColor = "blue",
+      library = "fa"
+    )
+    
+    
+    # Working boundaries
+    leaflet(distinct(coords_for_map)) %>% 
+      # flyToBounds(
+      setView(
+        lon_zoom, 
+        lat_zoom
+        , zoom = 11
+      ) %>%
+      # addProviderTiles(providers$CartoDB.Positron) %>%
+      addTiles() %>% 
+      addAwesomeMarkers(
+        ~lon, 
+        ~lat,
+        icon = awesome,
+        # icon = school_icons,
+        clusterOptions = markerClusterOptions(),
+        popup = ~paste(matched_address, "\n", lat, ", ", lon),
+        # popup = ~matched_address,
+        label = ~matched_address
+        # label = ~paste(matched_address, "\n", lat, ", ", lon)
+      ) %>% 
+      # addWebGLKMLHeatmap(kml, size = 20, units = "px") %>%
+      addKML(
+        afhs_kml,
+        markerType = "circleMarker",
+        stroke = FALSE, fillColor = "red", fillOpacity = 0.5,
+        markerOptions = markerOptions(radius = 1)
+      ) %>% 
+      addKML(
+        dehs_kml,
+        markerType = "circleMarker",
+        stroke = FALSE, fillColor = "orange", fillOpacity = 0.5,
+        markerOptions = markerOptions(radius = 1)
+      )%>% 
+      addKML(
+        cvhs_kml,
+        markerType = "circleMarker",
+        stroke = FALSE, fillColor = "blue", fillOpacity = 0.5,
+        markerOptions = markerOptions(radius = 1)
+      )%>% 
+      addKML(
+        mhs_kml,
+        markerType = "circleMarker",
+        stroke = FALSE, fillColor = "purple", fillOpacity = 0.5,
+        markerOptions = markerOptions(radius = 1)
+      )%>% 
+      addKML(
+        vhs_kml,
+        markerType = "circleMarker",
+        stroke = FALSE, fillColor = "yellow", fillOpacity = 0.5,
+        markerOptions = markerOptions(radius = 1)
+      )
     
   })
   
