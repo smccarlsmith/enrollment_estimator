@@ -62,12 +62,15 @@ super_sat_tab <- tabItem(
     column(
       box(
         leafletOutput("map"), 
+        h3("You can upload a CSV of latitude and longitude coordinates to visualize patterns in the map above"),
         fileInput("geocode_file", "Choose CSV File",
                   accept = c(
                     "text/csv",
                     "text/comma-separated-values,text/plain",
                     ".csv")
         ),
+        h4("Click below to download a template"),
+        downloadButton("download", label = "Download"), 
         width = 12
       ),
       width = 6

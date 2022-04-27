@@ -457,11 +457,12 @@ shinyServer(function(input, output) {
     # Working boundaries
     leaflet(distinct(coords_for_map)) %>% 
       # flyToBounds(
-      setView(
-        lon_zoom, 
-        lat_zoom
-        , zoom = 11
-      ) %>%
+      # I removed the call below to zoom to a specific range, allows it to be dictated by the data. 
+      # setView(
+      #   lon_zoom, 
+      #   lat_zoom
+      #   , zoom = 11
+      # ) %>%
       # addProviderTiles(providers$CartoDB.Positron) %>%
       addTiles() %>% 
       addAwesomeMarkers(
@@ -507,6 +508,20 @@ shinyServer(function(input, output) {
         markerOptions = markerOptions(radius = 1)
       )
     
-  })
+  }) # End of map widget creation renderLeaflet call
+  
+  
+  output$download <- downloadHandler(
+    filename <- function() {
+      "geocode_template.csv"
+    },
+    content <- function(file) {
+      file.copy("web/sample_geocodes.csv", file)
+    }
+  )
   
 }) # End of server function ----
+
+
+
+
